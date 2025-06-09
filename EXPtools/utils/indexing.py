@@ -206,3 +206,28 @@ def list_states_range(nmin, lmin, nmax, lmax):
     l_keep = l_list <= lmin
 
     return n_list[~(n_keep & l_keep)], l_list[~(n_keep & l_keep)], m_list[~(n_keep & l_keep)]
+
+def find_max_order(coefs):
+    '''find_max_order returns nmax and lmax for a coefficient set
+
+    Parameters
+    ----------
+    coefs : pyEXP coefficients
+        coefficient set
+
+    Returns 
+    -------
+    int
+        n_max for the coefficient set
+    int 
+        l_max for the coefficient set
+    '''
+
+    coefs_shape = coefs.getAllCoefs().shape
+    nmax = coefs_shape[1]
+    
+    # positive root of I = (lmax * (lmax + 1))/2 + lmax
+    lmax = int(np.sqrt(9./4. + 2*(coefs_shape[0] - 1)) - 3./2.)
+
+    return nmax, lmax
+

@@ -3,7 +3,7 @@ Functionality to handle coefficients
 """
 
 import numpy as np
-from EXPtools.utils.indexing import inverse_I, list_states_range
+from EXPtools.utils.indexing import list_states_range, find_max_order
 
 
 def remove_terms(original_coefficients, n, l, m, verbose=False):
@@ -59,9 +59,7 @@ def truncate_expansion(original_coefficients, nmax, lmax):
         truncated coefficient set
     '''
 
-    coefs_shape = original_coefficients.getAllCoefs().shape
-    nmax_original = coefs_shape[1]
-    lmax_original = int(np.sqrt(9./4. + 2*(coefs_shape[0] - 1)) - 3./2.)
+    nmax_original, lmax_original = find_max_order(original_coefficients)
 
     if (nmax > nmax_original) or (lmax > lmax_original):
         raise ValueError("New max orders must be lower than the size of the original expansion!")
