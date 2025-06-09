@@ -38,22 +38,22 @@ class ICHernquist:
     def triaxial(self, axis_ratios, rot_angle, 
 		 rot_axis = 'z', center = [0, 0, 0]):
         """
-	Parameters:
+        Parameters:
         -----------
         axis_ratios : list
             List of principal axis ratios in the following order: [a, b, c] 
             axis will be computes as x/a, y/b, z/c
-	rot_angle : float
-            Angle at which the halo is going to be rotated in degrees
-        rot_axis : str
-            Rotation axis it could be: 'x', 'y', 'z'
-        center: list
-            List with the 3d center of the halo [x, y, z] (default: [0, 0, 0])
+        rot_angle : float
+                Angle at which the halo is going to be rotated in degrees
+            rot_axis : str
+                Rotation axis it could be: 'x', 'y', 'z'
+            center: list
+                List with the 3d center of the halo [x, y, z] (default: [0, 0, 0])
 
-	Returns: 
+        Returns: 
         --------
         xyz: array-like
-	    Array with 3d-positions of the particles in the halo     	
+        Array with 3d-positions of the particles in the halo     	
         """
         
         a, b, c = axis_ratios

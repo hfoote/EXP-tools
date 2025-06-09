@@ -162,3 +162,47 @@ def listStates(n, lmax, allStates=True):
                        for l in range(0, lmax +  1) 
                          for m in range(0, lmax + 1) if m<=l]
     return states
+
+def list_states_range(nmin, lmin, nmax, lmax):
+    '''list_states_range returns all n,l,m indices between (lmin, lmax] and (nmin, lmax] 
+
+    Parameters
+    ----------
+    nmin : _type_
+        lower n bound (non-inclusive)
+    lmin : _type_
+        lower l bound (non-inclusive)
+    nmax : _type_
+        upper n bound (inclusive)
+    lmax : _type_
+        upper l bound (inclusive)
+
+    Returns
+    -------
+    np.ndarray
+        list of n states between the specified bounds
+    np.ndarray
+        list of l states between the specified bounds
+    np.ndarray
+        list of m states between the specified bounds
+    '''
+
+    n_list = []
+    l_list = []
+    m_list = []
+
+    for n in range(nmax+1):
+        for l in range(lmax+1):
+            for m in range(l+1):
+                n_list.append(n)
+                l_list.append(l)
+                m_list.append(m)
+
+    n_list = np.array(n_list)
+    l_list = np.array(l_list)
+    m_list = np.array(m_list)
+
+    n_keep = n_list <= nmin
+    l_keep = l_list <= lmin
+
+    return n_list[~(n_keep & l_keep)], l_list[~(n_keep & l_keep)], m_list[~(n_keep & l_keep)]
