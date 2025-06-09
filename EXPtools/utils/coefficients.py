@@ -41,17 +41,17 @@ def reorder_nlm(coefficients, nmax, lmax):
                 new_order[1][n][l][m] = coefs_matrix[n, lm_idx].imag
     return new_order
 
-def truncate_expansion(original_coefficients, nmax, lmax):
+def truncate_expansion(original_coefficients, nmax=None, lmax=None):
     '''truncate_expansion removes terms higher than nmax, lmax
 
     Parameters
     ----------
     original_coefficients : pyEXP coefficients
         coefficient set to be truncated
-    nmax : _type_
-        maximum n order to keep
-    lmax : _type_
-        maximum l order to keep
+    nmax : None or int, optional
+        maximum n order to keep. If None, keeps all orders
+    lmax : None or int, optional
+        maximum l order to keep. If None, keeps all orders
 
     Returns
     -------
@@ -61,8 +61,13 @@ def truncate_expansion(original_coefficients, nmax, lmax):
 
     nmax_original, lmax_original = find_max_order(original_coefficients)
 
-    if (nmax > nmax_original) or (lmax > lmax_original):
-        raise ValueError("New max orders must be lower than the size of the original expansion!")
+    if (nmax > nmax_original) or (nmax == None):
+        print(f"Keeping all n up to original nmax = {nmax_original}")
+        nmax = nmax_original
+
+    if (lmax > nmax_original) or (lmax == None):
+        print(f"Keeping all l up to original lmax = {lmax_original}")
+        lmax = lmax_original
 
     n_remove, l_remove, m_remove = list_states_range(nmax, lmax, nmax_original, lmax_original)
     
