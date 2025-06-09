@@ -61,11 +61,11 @@ def truncate_expansion(original_coefficients, nmax=None, lmax=None):
 
     nmax_original, lmax_original = find_max_order(original_coefficients)
 
-    if (nmax > nmax_original) or (nmax == None):
+    if (nmax == None) or (nmax >= nmax_original):
         print(f"Keeping all n up to original nmax = {nmax_original}")
         nmax = nmax_original
 
-    if (lmax > nmax_original) or (lmax == None):
+    if (lmax == None) or (lmax >= nmax_original):
         print(f"Keeping all l up to original lmax = {lmax_original}")
         lmax = lmax_original
 
