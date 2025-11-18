@@ -1,184 +1,390 @@
-import os, sys, pickle, pyEXP
+import os
+import sys
+import yaml
 import numpy as np
-from scipy.linalg import norm
-from EXPtools.basis_builder import makemodel
+import pyEXP
+from scipy.optimize import minimize
 
-def old_make_config(basis_id, numr, rmin, rmax, lmax, nmax, scale, 
-                modelname='', cachename='.slgrid_sph_cache'):
+def write_table(tablename, radius, density, mass, potential, fmt="%.6e"):
     """
-    Creates a configuration file required to build a basis model.
+    Write a table of radius, density, mass, and potential values to a text file.
 
-    Args:
-    basis_id (str): The identity of the basis model.
-    numr (int): The number of radial grid points.
-    rmin (float): The minimum radius value.
-    rmax (float): The maximum radius value.
-    lmax (int): The maximum l value of the basis.
-    nmax (int): The maximum n value of the basis.
-    scale (float): Scaling factor for the basis.
-    modelname (str, optional): Name of the model. Default is an empty string.
-    cachename (str, optional): Name of the cache file. Default is '.slgrid_sph_cache'.
+    Parameters
+    ----------
+    tablename : str
+        Output filename.
+    radius, density, mass, potential : array-like
+        Arrays of physical quantities, all with the same length.
+    fmt : str, optional
+        Format string for numerical values. Defaults to scientific notation with 6 decimals.
 
-    Returns:
-    str: A string representation of the configuration file.
-
-    Raises:
-    None
+    Notes
+    -----
+    Writes the table in the following format:
+        ! <tablename>
+        ! R    D    M    P
+        <Nrows>
+        <radius> <density> <mass> <potential>
     """
-    
-    config = 'id: {:s}\n'.format(basis_id)
-    config += 'parameters:\n'
-    config += '  numr: {:d}\n'.format(numr)
-    config += '  rmin: {:.7f}\n'.format(rmin)
-    config += '  rmax: {:.3f}\n'.format(rmax)
-    config += '  Lmax: {:d}\n'.format(lmax)
-    config += '  nmax: {:d}\n'.format(nmax)
-    config += '  scale: {:.3f}\n'.format(scale)
-    config += '  modelname: {}\n'.format(modelname)
-    config += '  cachename: {}\n'.format(cachename)
-    return config
+    # Convert inputs to NumPy arrays (for safety and performance)
+    radius = np.asarray(radius)
+    density = np.asarray(density)
+    mass = np.asarray(mass)
+    potential = np.asarray(potential)
+
+    # Stack data into a single 2D array for fast writing
+    data = np.column_stack((radius, density, mass, potential))
+
+    header = f"! {tablename}\n! R    D    M    P\n{len(radius)}"
+    np.savetxt(tablename, data, fmt=fmt, header=header, comments="")
 
 
-def make_halo_config(basis_id, numr, rmin, rmax, lmax, nmax, rmapping, 
-                modelname, cachename):
+def check_basis_params(basis_id, **kwargs):
     """
-    Creates a configuration file required to build a basis model.
+    Check that the required keyword arguments for a given basis are provided.
 
-    Args:
-    basis_id (str): The identity of the basis model.
-    numr (int): The number of radial grid points.
-    rmin (float): The minimum radius value.
-    rmax (float): The maximum radius value.
-    lmax (int): The maximum l value of the basis.
-    nmax (int): The maximum n value of the basis.
-    scale (float): Scaling factor for the basis.
-    modelname (str, optional): Name of the model. Default is an empty string.
-    cachename (str, optional): Name of the cache file. Default is '.slgrid_sph_cache'.
+    Parameters
+    ----------
+    basis_id : str
+        The identifier of the basis set. 
+        Accepted values are:
+        - ``'sphereSL'`` : Spherical basis with Stäckel-like mapping.
+        - ``'cylinder'`` : Cylindrical basis.
+    **kwargs : dict
+        Arbitrary keyword arguments corresponding to the basis parameters.
+        The required keys depend on ``basis_id``:
 
-    Returns:
-    str: A string representation of the configuration file.
+        - For ``'sphereSL'``:
+          ['lmax', 'mmax', 'modelname', 'rmapping', 'cachename']
 
-    Raises:
-    None
-    """
-    
-    config = 'id: {:s}\n'.format(basis_id)
-    config += 'parameters:\n'
-    config += '  numr: {:d}\n'.format(numr)
-    config += '  rmin: {:.7f}\n'.format(rmin)
-    config += '  rmax: {:.3f}\n'.format(rmax)
-    config += '  Lmax: {:d}\n'.format(lmax)
-    config += '  nmax: {:d}\n'.format(nmax)
-    config += '  rmapping: {:.3f}\n'.format(rmapping)
-    config += '  modelname: {}\n'.format(modelname)
-    config += '  cachename: {}\n'.format(cachename)
-    return config
+        - For ``'cylinder'``:
+          ['acyl', 'hcyl', 'nmaxfid', 'lmaxfid', 'mmax', 'nmax', 'ncylodd',
+           'ncylnx', 'ncylny', 'rnum', 'pmun', 'tnum', 'vflag', 'logr', 'cachename']
 
-    
-def makebasis(pos, mass, basis_model, config=None, basis_id='sphereSL', time=0,
-              r_s=1.0, r_c=0.0,
-              nbins=500, rmin=0.61, rmax=599, log_space=True, lmax=4, nmax=20, scale=1,
-              norm_mass_coef = True, modelname='dens_table.txt', cachename='.slgrid_sph_cache', add_coef = False,
-              coef_file=''
-              ):
-    """
-    Create a BFE expansion for a given set of particle positions and masses.
-    
-    Parameters:
-    pos (numpy.ndarray): The positions of particles. Each row represents one particle, 
-                         and each column represents the coordinate of that particle.
-    mass (numpy.ndarray): The masses of particles. The length of this array should be the same 
-                          as the number of particles.
-    basismodel (string): The model to compute, NFW,Hernquist, singlepowerlaw and empirical are available
-                        A modelname file can be used to specify a particular model if needed.
-    config (pyEXP.config.Config, optional): A configuration object that specifies the basis set. 
-                                             If not provided, an empirical density profile will be computed 
-                                             and a configuration object will be created automatically.
-    basis_id (str, optional): The type of basis set to be used. Default is 'sphereSL'.
-    time (float, optional): The time at which the expansion is being computed. Default is 0.
-    r_s (float,optional): scale radius used in the computation of the model.
-    r_c (float,optional): core radius used in the computation of the model.
-    nbins (int, optional): The number of radial grid points in the basis set. Default is 500.
-    rmin (float, optional): The minimum radius of the basis set. Default is 0.61.
-    rmax (float, optional): The maximum radius of the basis set. Default is 599.
-    lmax (int, optional): The maximum harmonic order in the basis set. Default is 4.
-    nmax (int, optional): The maximum number of polynomials in the basis set. Default is 20.
-    scale (float, optional): The scale of the basis set in physical units.
-    modelname (str, optional): The name of the file containing the density profile model. 
-                               Default is 'dens_table.txt'.
-    cachename (str, optional): The name of the file that will be used to cache the basis set. 
-                               Default is '.slgrid_sph_cache'.
-    coef_file (str, optional): The name of the file if provided that will be used to save the coef files as .h5.
-                              Default is ''. 
-    Returns:
-    tuple: A tuple containing the basis and the coefficients of the expansion.
-           The basis is an instance of pyEXP.basis.Basis, and the coefficients are 
-           an instance of pyEXP.coefs.Coefs.
+    Returns
+    -------
+    bool
+        Returns ``True`` if all mandatory parameters are present.
+
+    Raises
+    ------
+    KeyError
+        If one or more mandatory keyword arguments are missing for the selected basis.
+    AttributeError
+        If ``basis_id`` is not recognized (must be either 'sphereSL' or 'cylinder').
+
+    Examples
+    --------
+    check_basis_params('sphereSL', lmax=4, mmax=4, modelname='hernquist',
+    ...                    rmapping='linear', cachename='cache_sph')
+    True
+
+    check_basis_params('cylinder', acyl=1.0, hcyl=2.0)  
+    Traceback (most recent call last):
+    ...
+    KeyError: "Missing mandatory keyword arguments missing: [...]"
     """
     
+    if basis_id == 'sphereSL':
+        mandatory_keys = ['lmax', 'mmax', 'modelname', 'rmapping', 'cachename']
+        missing = [key for key in mandatory_keys if key not in kwargs]
+        if missing:
+            raise KeyError(f"Missing mandatory keyword arguments missing: {missing}")
+        return True
+    elif basis_id == 'cylinder':
+        mandatory_keys = ['acyl', 'hcyl', 'nmaxfid', 'lmaxfid', 
+                           'mmax', 'nmax', 'ncylodd', 'ncylnx', 
+                        
+                           'ncylny', 'rnum', 'pmun', 'tnum', 'vflag', 'logr', 'cachename']  
+        missing = [key for key in mandatory_keys if key not in kwargs]
+        if missing:
+            raise KeyError(f"Missing mandatory keyword arguments missing: {missing}")
+        return True
+    else: 
+        raise AttributeError(f"basis id {basis_id} not found. Please chose between sphereSL or cylinder")
+	
 
-    if log_space == True:
-        rbins =  np.logspace(np.log10(rmin), np.log10(rmax), nbins+1)
-    elif log_space == False:
-        rbins = np.linspace(rmin, rmax, nbins+1)
+def make_config(basis_id, float_fmt_rmin="{:.7f}", float_fmt_rmax="{:.3f}",
+                float_fmt_rmapping="{:.3f}", **kwargs):
+    """
+    Create a YAML configuration file string for building a basis model.
 
-    if os.path.isfile(modelname) == False:
-        print("-> File model not found so we are computing one \n")
+    Parameters
+    ----------
+    basis_id : str
+        Identifier of the basis model. Must be either 'sphereSL' or 'cylinder'.
+    float_fmt_rmin : str, optional
+        Format string for rmin (default ``"{:.7f}"``).
+    float_fmt_rmax : str, optional
+        Format string for rmax (default ``"{:.3f}"``).
+    float_fmt_rmapping : str, optional
+        Format string for rmapping (default ``"{:.3f}"``).
+    **kwargs : dict
+        Additional keyword arguments required depending on the basis type:
 
-        if basis_model == "empirical":
-            print('-> Computing empirical model')
-            #rho = empirical_density_profile(pos, mass, rbins)
-            
-            R, D, M, P = makemodel.makemodel(makemodel.empirical_density_profile, M=np.sum(mass),
-                                   funcargs=[pos, mass], rvals=rbins)
-        
-        elif basis_model == "Hernquist":
-            print('-> Computing analytical Hernquist model')
-            R, D, M, P = makemodel.makemodel(makemodel.powerhalo, M=np.sum(mass),
-                                             funcargs=[r_s, r_c, 1.0, 3.0], rvals = rbins,
-                                             pfile=modelname)
-        
-        elif basis_model == "NFW":
-            print('-> Computing analytical NFW model')
-            R, D, M, P = makemodel.makemodel(makemodel.powerhalo, M=np.sum(mass),
-                                             funcargs=[r_s, r_c, 1.0, 2.0], rvals = rbins,
-                                             pfile=modelname)
-        elif basis_model == "singlepowerlaw":
-            print('-> Computing analytical Hernquist model') 
-            R, D, M, P = makemodel.makemodel(makemodel.powerhalo, M=np.sum(mass),
-                                             funcargs=[r_s, r_c, 2.5, 0.0], rvals = rbins,
-                                             pfile=modelname)
-            
-        print('-> Model computed: rmin={}, rmax={}, numr={}'.format(R[0], R[-1], len(R)))
-    else:
-        R, D, M, P  = np.loadtxt(modelname, skiprows=3, unpack=True) 
-    # check if config file is passed
-    if config is None:
-        print('No config file provided.')
-        print(f'Computing empirical density')
-        #rad, rho = empirical_density_profile(pos, mass, nbins=500)
-        #makemodel_empirical(r_exact, rho, outfile=modelname)
-        #R = [0.01, 600]
-        config = make_halo_config(basis_id, nbins+1, R[0], R[-1], lmax, nmax, scale, 
-                             modelname, cachename)
+        - For ``sphereSL``:
+          ['lmax', 'nmax', 'rmapping', 'modelname', 'cachename']
 
-    # Construct the basis instances
+        - For ``cylinder``:
+          ['acyl', 'hcyl', 'nmaxfid', 'lmaxfid', 'mmax', 'nmax',
+           'ncylodd', 'ncylnx', 'ncylny', 'rnum', 'pnum', 'tnum',
+           'vflag', 'logr', 'cachename']
+
+    Returns
+    -------
+    str
+        YAML configuration file contents.
+
+    Raises
+    ------
+    KeyError
+        If mandatory parameters for the given basis are missing.
+    FileNotFoundError
+        If ``modelname`` is required but cannot be opened.
+    ValueError
+        If the model file does not contain valid radius data.
+    """
+
+    check_basis_params(basis_id, **kwargs)
+
+    if basis_id == "sphereSL":
+        modelname = kwargs["modelname"]
+        try:
+            R = np.loadtxt(modelname, skiprows=3, usecols=0)
+        except OSError as e:
+            raise FileNotFoundError(f"Could not open model file '{modelname}'") from e
+        if R.size == 0:
+            raise ValueError(f"Model file '{modelname}' contains no radius data")
+
+        rmin, rmax, numr = R[0], R[-1], len(R)
+
+        config_dict = {
+            "id": basis_id,
+            "parameters": {
+                "numr": int(numr),
+                "rmin": rmin,
+                "rmax": rmax,
+                "Lmax": int(kwargs["lmax"]),
+                "nmax": int(kwargs["nmax"]),
+                "rmapping": float(kwargs["rmapping"]),
+                "modelname": str(modelname),
+                "cachename": str(kwargs["cachename"]),
+            },
+        }
+
+    elif basis_id == "cylinder":
+        config_dict = {
+            "id": basis_id,
+            "parameters": {
+                "acyl": float(kwargs["acyl"]),
+                "hcyl": float(kwargs["hcyl"]),
+                "nmaxfid": int(kwargs["nmaxfid"]),
+                "lmaxfid": int(kwargs["lmaxfid"]),
+                "mmax": int(kwargs["mmax"]),
+                "nmax": int(kwargs["nmax"]),
+                "ncylodd": int(kwargs["ncylodd"]),
+                "ncylnx": int(kwargs["ncylnx"]),
+                "ncylny": int(kwargs["ncylny"]),
+                "rnum": int(kwargs["rnum"]),
+                "pnum": int(kwargs["pnum"]),
+                "tnum": int(kwargs["tnum"]),
+                "vflag": int(kwargs["vflag"]),
+                "logr": bool(kwargs["logr"]),
+                "cachename": str(kwargs["cachename"]),
+            },
+        }
+
+    return yaml.dump(config_dict, sort_keys=False)
+
+def make_Dfit(r_data, rho_data, fit_func, 
+              params_guess=None, params_bounds=None):
+    """
+    Fit a density profile to data using least-squares in log space.
+
+    Parameters
+    ----------
+    r_data : ndarray
+        Radial grid where the density data is defined.
+    rho_data : ndarray
+        Observed density values at `r_data`.
+    fit_func : callable
+        Model function with signature `fit_func(params, *fun_params)`.
+    fun_params : tuple
+        Extra arguments to pass to `fit_func` (e.g., analytic profile).
+    params_guess : list of float, optional
+        Initial parameter guess (default: [1.0, 0.5]).
+    params_bounds : list of tuple, optional
+        Bounds for parameters (default: [(1e-4, 1e-2), (0, 2)]).
+
+    Returns
+    -------
+    rho_fit : ndarray
+        Best-fit model evaluated at `r_data`.
+    best_fit_params : ndarray
+        Optimized parameter values.
+    """
+    
+    log_rho_data = np.log10(np.maximum(rho_data, 1e-12))
+
+    def objective(params):
+        rho_model = fit_func(params, r_data)
+        log_rho_model = np.log10(np.maximum(rho_model, 1e-12))
+        return np.sum((log_rho_model - log_rho_data) ** 2)
+
+    res = minimize(
+        objective,
+        x0=params_guess,
+        method="L-BFGS-B",
+        bounds=params_bounds
+    )
+
+    best_fit_params = res.x
+    rho_fit = fit_func(best_fit_params, r_data)
+    return rho_fit, best_fit_params
+
+
+def make_model(radius, density, Mtotal, output_filename='', physical_units=False, verbose=True):
+    """
+    Generate an EXP-compatible spherical basis function table.
+
+    Parameters
+    ----------
+    radius : array-like
+        Radii at which the density values are evaluated.
+    density : array-like
+        Density values corresponding to radius.
+    Mtotal : float
+        Total mass of the model, used for normalization.
+    output_filename : str, optional
+        Name of the output file to save the table. If empty, no file is written.
+    physical_units : bool, optional
+        If True, disables scaling and returns physical values (default: False).
+    verbose : bool, optional
+        If True, prints scaling information.
+
+    Returns
+    -------
+    result : dict
+        Dictionary with the following keys:
+        - 'radius' : ndarray
+            Scaled radius values.
+        - 'density' : ndarray
+            Scaled density values.
+        - 'mass' : ndarray
+            Scaled enclosed mass values.
+        - 'potential' : ndarray
+            Scaled potential values.
+    """
+    EPS_MASS = 1e-15
+    EPS_R = 1e-10
+    
+    Rmax = np.nanmax(radius)
+    
+    mass = np.zeros_like(density)
+    pwvals = np.zeros_like(density)
+
+    mass[0] = 1.e-15
+    pwvals[0] = 0.
+
+    dr = np.diff(radius)  
+
+    # Midpoint integration for enclosed mass and potential
+    mass_contrib = 2.0 * np.pi * (
+        radius[:-1]**2 * density[:-1] + radius[1:]**2 * density[1:]
+    ) * dr
+
+    pwvals_contrib = 2.0 * np.pi * (
+        radius[:-1] * density[:-1] + radius[1:] * density[1:]
+    ) * dr
+
+    # Now cumulative sum to get the arrays
+    mass = np.concatenate(([EPS_MASS], EPS_MASS + np.cumsum(mass_contrib)))
+    pwvals = np.concatenate(([0.0], np.cumsum(pwvals_contrib)))
+    
+    potential = -mass / (radius + EPS_R) - (pwvals[-1] - pwvals)
+
+    M0 = mass[-1]
+    R0 = radius[-1]
+
+    Beta = (Mtotal / M0) * (R0 / Rmax)
+    Gamma = np.sqrt((M0 * R0) / (Mtotal * Rmax)) * (R0 / Rmax)
+
+    if verbose:
+        print(f"! Scaling: R = {Rmax}  M = {Mtotal}")
+
+    rfac = Beta**-0.25 * Gamma**-0.5
+    dfac = Beta**1.5 * Gamma
+    mfac = Beta**0.75 * Gamma**-0.5
+    pfac = Beta
+
+    if physical_units:
+        rfac = dfac = mfac = pfac = 1.0
+
+    if verbose:
+        print(f"Scaling factors: rfac = {rfac}, dfac = {dfac}, mfac = {mfac}, pfac = {pfac}")
+
+    if output_filename:
+        write_table(
+            output_filename,
+            radius * rfac,
+            density * dfac,
+            mass * mfac,
+            potential * pfac
+        )
+
+    return {
+        "radius": radius * rfac,
+        "density": density * dfac,
+        "mass": mass * mfac,
+        "potential": potential * pfac,
+    }
+    
+    
+def make_basis(R, D, Mtotal, basis_params, modelname="test_model.txt", cachename='test_cache.txt'):
+    """
+    Construct a basis from a given radial density profile.
+
+    Parameters
+    ----------
+    R : array_like
+        Radial grid points (e.g., radii at which density `D` is defined).
+    D : array_like
+        Density values corresponding to each radius in `R`.
+    Mtotal : float, optional
+        Total mass normalization (default is 1.0).
+    modelname : str, optional
+        Name of the model, used for intermediate output files (default is "model").
+    lmax : int, optional
+        Maximum spherical harmonic degree `l` for the expansion (default is 10).
+    nmax : int, optional
+        Maximum radial order `n` for the expansion (default is 10).
+
+    Returns
+    -------
+    basis : pyEXP.basis.Basis
+        A SCF basis object initialized with the given density model.
+
+    Notes
+    -----
+    - This function wraps `makemodel.makemodel` to generate a model from 
+      the supplied density profile and total mass.
+    - It then builds a spherical basis (`sphereSL`) using `EXPtools.make_config`
+      and returns the corresponding `pyEXP` basis object.
+    """
+    R, D, M, P = make_model(
+        D, R, Mtotal=Mtotal, 
+        output_filename=modelname
+    )
+
+    config = make_config(
+        basis_id=basis_params['basis_id'], 
+        lmax=basis_params['lmax'], 
+        nmax=basis_params['nmax'], 
+        rmapping=R[-1], 
+        modelname=modelname,
+        cachename=cachename
+    )
+
     basis = pyEXP.basis.Basis.factory(config)
+    return basis
 
-    # Prints info from Cache
-    basis.cacheInfo(cachename)
-    
-    #compute coefficients
-    if norm_mass_coef == True :
-        coef = basis.createFromArray(mass/np.sum(mass), pos.T, time=time)
-    elif norm_mass_coef == False : 
-        coef = basis.createFromArray(mass, pos.T, time=time)
-
-    coefs = pyEXP.coefs.Coefs.makecoefs(coef, 'dark halo')
-    coefs.add(coef)
-    if add_coef == False:
-      coefs.WriteH5Coefs(coef_file)
-    elif add_coef == True:
-      coefs.ExtendH5Coefs(coef_file)
-    
-    return basis, coefs
